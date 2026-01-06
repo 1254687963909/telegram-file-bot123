@@ -16,7 +16,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")
 # ADMIN_ID ni Railway dan olamiz, agar bo'lmasa siz yuborgan ID ni ishlatadi
-admin_id_env = os.getenv("ADMIN_ID", "6617367133")
+admin_id_env = os.getenv("ADMIN_ID", "7699033921")
 ADMIN_ID = int(admin_id_env)
 CHANNEL_ID = "@Kimyo_imtihon_savollar"
 
@@ -208,3 +208,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot to'xtatildi!")
+
