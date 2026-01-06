@@ -14,12 +14,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # --- KONFIGURATSIYA ---
 TOKEN = os.getenv("BOT_TOKEN")
-# Username-dagi @ belgisini avtomatik olib tashlaymiz
 raw_username = os.getenv("BOT_USERNAME", "")
-BOT_USERNAME = raw_username.replace("@", "") 
+BOT_USERNAME = raw_username.replace("@", "").strip()
 
-# Admin ID ni Railway dan olamiz, agar bo'lmasa 6617367133 ni qo'yadi
-admin_raw = os.getenv("ADMIN_ID", "7699033921")
+# Admin ID ni Railway dan olamiz, agar xato bo'lsa stripping qilamiz
+admin_raw = str(os.getenv("ADMIN_ID", "7699033921")).strip()
 ADMIN_ID = int(admin_raw)
 
 CHANNEL_ID = "@Kimyo_imtihon_savollar"
@@ -48,7 +47,6 @@ class AdFilter(BaseFilter):
         return any(re.search(p, text) for p in patterns)
 
 async def check_subscription(user_id: int):
-    # Admin bo'lsa tekshirib o'tirmaydi
     if user_id == ADMIN_ID:
         return True
     try:
@@ -57,30 +55,36 @@ async def check_subscription(user_id: int):
     except:
         return False
 
-# --- ADMIN KEYBOARD ---
+# --- KEYBOARDS ---
 def admin_keyboard():
-    return ReplyKeyboardMarkup(keyboard=[
+    kb = [
         [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📣 Reklama yuborish")]
-    ], resize_keyboard=True)
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
-# --- START BUYRUG'I ---
+# --- BUYRUQLAR ---
+
+@dp.message(Command("myid"))
+async def get_my_id(message: types.Message):
+    await message.answer(f"Sizning ID: `{message.from_user.id}`\nAdmin ID: `{ADMIN_ID}`", parse_mode="Markdown")
+
 @dp.message(Command("start"), F.chat.type == "private")
 async def start_cmd(message: types.Message):
-    # Bazaga foydalanuvchini qo'shish
-    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (message.from_user.id,))
+    user_id = message.from_user.id
+    # Bazaga qo'shish
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
-    # ADMIN TEKSHIRUVI (Birinchi navbatda)
-    if message.from_user.id == ADMIN_ID:
-        await message.answer(f"👋 Salom, Admin ({ADMIN_ID})! Kerakli bo'limni tanlang:", reply_markup=admin_keyboard())
+    # ADMIN TEKSHIRUVI
+    if user_id == ADMIN_ID:
+        await message.answer("👋 Salom, Admin! Kerakli bo'limni tanlang:", reply_markup=admin_keyboard())
         return
 
-    # ODDIY FOYDALANUVCHI
-    is_subscribed = await check_subscription(message.from_user.id)
-    if is_subscribed:
+    # FOYDALANUVCHI TEKSHIRUVI
+    if await check_subscription(user_id):
         link = f"https://t.me/{BOT_USERNAME}?startgroup=true"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Guruhga qo'shish", url=link)]])
-        await message.answer("✅ Obuna tasdiqlandi. Meni guruhga qo'shib admin qilsangiz, reklamalarni tozalayman.", reply_markup=kb)
+        await message.answer("✅ Obuna tasdiqlangan. Meni guruhga qo'shib admin qiling:", reply_markup=kb)
     else:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Kanalga a'zo bo'lish", url=f"https://t.me/{CHANNEL_ID[1:]}")],
@@ -88,96 +92,112 @@ async def start_cmd(message: types.Message):
         ])
         await message.answer("⚠️ Botdan foydalanish uchun kanalga a'zo bo'ling:", reply_markup=kb)
 
-# --- ADMIN FUNKSIYALARI ---
+# --- ADMIN PANEL LOGIKASI ---
+
 @dp.message(F.text == "📊 Statistika", F.from_user.id == ADMIN_ID)
-async def stats(message: types.Message):
+async def stats_handler(message: types.Message):
     cursor.execute("SELECT COUNT(*) FROM users")
     u = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM chats")
     c = cursor.fetchone()[0]
-    await message.answer(f"📊 **Statistika:**\n\n👤 Foydalanuvchilar: {u}\n👥 Guruhlar: {c}", parse_mode="Markdown")
+    await message.answer(f"📊 **Bot statistikasi:**\n\n👤 Foydalanuvchilar: {u}\n👥 Guruhlar: {c}", parse_mode="Markdown")
 
 @dp.message(F.text == "📣 Reklama yuborish", F.from_user.id == ADMIN_ID)
-async def broadcast_start(message: types.Message, state: FSMContext):
-    await message.answer("📣 Reklama xabarini yuboring (Text, rasm, video).\nBekor qilish uchun /cancel", reply_markup=types.ReplyKeyboardRemove())
+async def broadcast_request(message: types.Message, state: FSMContext):
+    await message.answer("📣 Reklama xabarini yuboring (rasm, video yoki matn).\nBekor qilish uchun: /cancel", reply_markup=types.ReplyKeyboardRemove())
     await state.set_state(BroadcastStates.waiting_for_message)
 
 @dp.message(Command("cancel"), BroadcastStates.waiting_for_message)
-async def cancel(message: types.Message, state: FSMContext):
+async def broadcast_cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("❌ Bekor qilindi.", reply_markup=admin_keyboard())
 
 @dp.message(BroadcastStates.waiting_for_message, F.from_user.id == ADMIN_ID)
-async def broadcast_send(message: types.Message, state: FSMContext):
+async def broadcast_execute(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("🚀 Tarqatilmoqda...")
+    await message.answer("🚀 Reklama tarqatilmoqda...")
     
     cursor.execute("SELECT user_id FROM users")
-    us = [r[0] for r in cursor.fetchall()]
+    users = [r[0] for r in cursor.fetchall()]
     cursor.execute("SELECT chat_id FROM chats")
-    ch = [r[0] for r in cursor.fetchall()]
+    chats = [r[0] for r in cursor.fetchall()]
     
-    all_targets = list(set(us + ch))
-    ok = 0
-    for t in all_targets:
+    all_targets = list(set(users + chats))
+    count = 0
+    for target in all_targets:
         try:
-            await message.copy_to(t)
-            ok += 1
+            await message.copy_to(chat_id=target)
+            count += 1
             await asyncio.sleep(0.05)
         except:
             continue
-    await message.answer(f"✅ Yakunlandi: {ok} ta manzilga yuborildi.", reply_markup=admin_keyboard())
+    await message.answer(f"✅ Yakunlandi! {count} ta manzilga yetkazildi.", reply_markup=admin_keyboard())
 
-# --- CALLBACK ---
+# --- QOLGAN FUNKSIYALAR ---
+
 @dp.callback_query(F.data == "check_sub")
-async def check_cb(call: CallbackQuery):
+async def check_callback(call: CallbackQuery):
     if await check_subscription(call.from_user.id):
         await call.message.delete()
         link = f"https://t.me/{BOT_USERNAME}?startgroup=true"
-        await call.message.answer("✅ Rahmat! Guruhga qo'shish tugmasini bosing:", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Guruhga qo'shish", url=link)]]))
+        await call.message.answer("✅ Rahmat! Meni guruhga qo'shishingiz mumkin:", 
+                                  reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Guruhga qo'shish", url=link)]]))
     else:
-        await call.answer("❌ Obuna bo'lmagansiz!", show_alert=True)
+        await call.answer("❌ Siz hali kanalga a'zo emassiz!", show_alert=True)
 
-# --- GURUHDA ISHLASH ---
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
-async def cleaner(message: types.Message):
-    # Guruhni bazaga olish (reklama yuborish uchun kerak)
+async def group_handler(message: types.Message):
+    # Guruhni bazaga qo'shish
     cursor.execute("INSERT OR IGNORE INTO chats (chat_id) VALUES (?)", (message.chat.id,))
     conn.commit()
 
+    # Reklama filtri
     if await AdFilter()(message):
         try:
-            m = await message.chat.get_member(message.from_user.id)
-            if m.status in ['administrator', 'creator']: return
-        except: return
+            member = await message.chat.get_member(message.from_user.id)
+            if member.status in ['administrator', 'creator']:
+                return
+        except:
+            return
 
-        try: await message.delete()
-        except: return
+        # Bot adminligini tekshirish
+        bot_member = await message.chat.get_member(bot.id)
+        if not bot_member.can_delete_messages or not bot_member.can_restrict_members:
+            return
 
-        # Jazo
-        cursor.execute("SELECT count, last_time FROM violations WHERE user_id = ? AND chat_id = ?", (message.from_user.id, message.chat.id))
-        row = cursor.fetchone()
-        mute = 10
-        count = 1
-        if row:
-            last = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S.%f')
-            if datetime.now() - last < timedelta(weeks=1):
-                count = row[0] + 1
-                mute = count * 10
-        
         try:
-            await bot.restrict_chat_member(message.chat.id, message.from_user.id, ChatPermissions(can_send_messages=False), until_date=datetime.now() + timedelta(minutes=mute))
-        except: pass
-
-        cursor.execute("INSERT OR REPLACE INTO violations VALUES (?, ?, ?, ?)", (message.from_user.id, message.chat.id, count, datetime.now()))
-        conn.commit()
+            await message.delete()
+            
+            # Jazo hisoblash
+            cursor.execute("SELECT count, last_time FROM violations WHERE user_id = ? AND chat_id = ?", (message.from_user.id, message.chat.id))
+            row = cursor.fetchone()
+            mute_min, count = 10, 1
+            
+            if row:
+                last_time = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S.%f')
+                if datetime.now() - last_time < timedelta(weeks=1):
+                    count = row[0] + 1
+                    mute_min = count * 10
+            
+            await bot.restrict_chat_member(
+                message.chat.id, 
+                message.from_user.id, 
+                ChatPermissions(can_send_messages=False),
+                until_date=datetime.now() + timedelta(minutes=mute_min)
+            )
+            
+            cursor.execute("INSERT OR REPLACE INTO violations VALUES (?, ?, ?, ?)", 
+                           (message.from_user.id, message.chat.id, count, datetime.now()))
+            conn.commit()
+        except:
+            pass
 
 async def main():
-    print(f"Bot @{BOT_USERNAME} admin {ADMIN_ID} bilan ishga tushdi...")
+    print(f"Bot @{BOT_USERNAME} ishga tushdi. Admin ID: {ADMIN_ID}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try: asyncio.run(main())
-    except KeyboardInterrupt: print("Stop")
-
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Bot to'xtatildi")
