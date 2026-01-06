@@ -14,9 +14,14 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # --- KONFIGURATSIYA ---
 TOKEN = os.getenv("BOT_TOKEN")
-# DIQQAT: Username @ belgisiz bo'lishi kerak. Masalan: Tozalovchi_bot
-BOT_USERNAME = os.getenv("BOT_USERNAME") 
-ADMIN_ID = 6617367133 # Sizning ID raqamingiz
+# Username-dagi @ belgisini avtomatik olib tashlaymiz
+raw_username = os.getenv("BOT_USERNAME", "")
+BOT_USERNAME = raw_username.replace("@", "") 
+
+# Admin ID ni Railway dan olamiz, agar bo'lmasa 6617367133 ni qo'yadi
+admin_raw = os.getenv("ADMIN_ID", "6617367133")
+ADMIN_ID = int(admin_raw)
+
 CHANNEL_ID = "@Kimyo_imtihon_savollar"
 
 logging.basicConfig(level=logging.INFO)
@@ -43,11 +48,14 @@ class AdFilter(BaseFilter):
         return any(re.search(p, text) for p in patterns)
 
 async def check_subscription(user_id: int):
-    if user_id == ADMIN_ID: return True
+    # Admin bo'lsa tekshirib o'tirmaydi
+    if user_id == ADMIN_ID:
+        return True
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         return member.status in ["member", "administrator", "creator"]
-    except: return False
+    except:
+        return False
 
 # --- ADMIN KEYBOARD ---
 def admin_keyboard():
@@ -58,19 +66,21 @@ def admin_keyboard():
 # --- START BUYRUG'I ---
 @dp.message(Command("start"), F.chat.type == "private")
 async def start_cmd(message: types.Message):
-    # Bazaga qo'shish
+    # Bazaga foydalanuvchini qo'shish
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (message.from_user.id,))
     conn.commit()
 
+    # ADMIN TEKSHIRUVI (Birinchi navbatda)
     if message.from_user.id == ADMIN_ID:
-        await message.answer("👋 Salom, Admin! Kerakli bo'limni tanlang:", reply_markup=admin_keyboard())
+        await message.answer(f"👋 Salom, Admin ({ADMIN_ID})! Kerakli bo'limni tanlang:", reply_markup=admin_keyboard())
         return
 
+    # ODDIY FOYDALANUVCHI
     is_subscribed = await check_subscription(message.from_user.id)
     if is_subscribed:
         link = f"https://t.me/{BOT_USERNAME}?startgroup=true"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Guruhga qo'shish", url=link)]])
-        await message.answer("✅ Obuna tasdiqlandi. Botingizni guruhga qo'shishingiz mumkin:", reply_markup=kb)
+        await message.answer("✅ Obuna tasdiqlandi. Meni guruhga qo'shib admin qilsangiz, reklamalarni tozalayman.", reply_markup=kb)
     else:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Kanalga a'zo bo'lish", url=f"https://t.me/{CHANNEL_ID[1:]}")],
@@ -78,7 +88,7 @@ async def start_cmd(message: types.Message):
         ])
         await message.answer("⚠️ Botdan foydalanish uchun kanalga a'zo bo'ling:", reply_markup=kb)
 
-# --- ADMIN ISHLARI ---
+# --- ADMIN FUNKSIYALARI ---
 @dp.message(F.text == "📊 Statistika", F.from_user.id == ADMIN_ID)
 async def stats(message: types.Message):
     cursor.execute("SELECT COUNT(*) FROM users")
@@ -89,13 +99,13 @@ async def stats(message: types.Message):
 
 @dp.message(F.text == "📣 Reklama yuborish", F.from_user.id == ADMIN_ID)
 async def broadcast_start(message: types.Message, state: FSMContext):
-    await message.answer("Reklama xabarini yuboring (Text, rasm, video).\nBekor qilish uchun /cancel")
+    await message.answer("📣 Reklama xabarini yuboring (Text, rasm, video).\nBekor qilish uchun /cancel", reply_markup=types.ReplyKeyboardRemove())
     await state.set_state(BroadcastStates.waiting_for_message)
 
 @dp.message(Command("cancel"), BroadcastStates.waiting_for_message)
 async def cancel(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("Bekor qilindi.", reply_markup=admin_keyboard())
+    await message.answer("❌ Bekor qilindi.", reply_markup=admin_keyboard())
 
 @dp.message(BroadcastStates.waiting_for_message, F.from_user.id == ADMIN_ID)
 async def broadcast_send(message: types.Message, state: FSMContext):
@@ -114,10 +124,11 @@ async def broadcast_send(message: types.Message, state: FSMContext):
             await message.copy_to(t)
             ok += 1
             await asyncio.sleep(0.05)
-        except: continue
+        except:
+            continue
     await message.answer(f"✅ Yakunlandi: {ok} ta manzilga yuborildi.", reply_markup=admin_keyboard())
 
-# --- CALLBACK VA TOZALASH ---
+# --- CALLBACK ---
 @dp.callback_query(F.data == "check_sub")
 async def check_cb(call: CallbackQuery):
     if await check_subscription(call.from_user.id):
@@ -128,9 +139,10 @@ async def check_cb(call: CallbackQuery):
     else:
         await call.answer("❌ Obuna bo'lmagansiz!", show_alert=True)
 
+# --- GURUHDA ISHLASH ---
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def cleaner(message: types.Message):
-    # Guruhni bazaga olish
+    # Guruhni bazaga olish (reklama yuborish uchun kerak)
     cursor.execute("INSERT OR IGNORE INTO chats (chat_id) VALUES (?)", (message.chat.id,))
     conn.commit()
 
@@ -162,6 +174,7 @@ async def cleaner(message: types.Message):
         conn.commit()
 
 async def main():
+    print(f"Bot @{BOT_USERNAME} admin {ADMIN_ID} bilan ishga tushdi...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
