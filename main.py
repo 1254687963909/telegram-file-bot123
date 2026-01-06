@@ -12,7 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 # --- KONFIGURATSIYA ---
 TOKEN = os.getenv("BOT_TOKEN")  
 BOT_USERNAME = os.getenv("BOT_USERNAME")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 6617367133)) # Default qiymat sifatida sizning ID-ingiz
+ADMIN_ID = int(os.getenv("ADMIN_ID", 5892540785)) # Default qiymat sifatida sizning ID-ingiz
 CHANNEL_ID = "@Kimyo_imtihon_savollar"
 
 logging.basicConfig(level=logging.INFO)
@@ -206,3 +206,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot to'xtatildi!")
+
