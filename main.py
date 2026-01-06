@@ -18,7 +18,7 @@ raw_username = os.getenv("BOT_USERNAME", "")
 BOT_USERNAME = raw_username.replace("@", "").strip() # @ belgisiz username
 
 # Admin ID tekshiruvi (Railway'dan olinadi yoki koddagi raqam ishlatiladi)
-admin_raw = str(os.getenv("ADMIN_ID", "7699033921")).strip()
+admin_raw = str(os.getenv("ADMIN_ID", "6617367133")).strip()
 ADMIN_ID = int(admin_raw)
 
 CHANNEL_ID = "@Kimyo_imtihon_savollar"
@@ -209,3 +209,4 @@ async def main():
 if __name__ == "__main__":
     try: asyncio.run(main())
     except KeyboardInterrupt: print("Stop")
+
