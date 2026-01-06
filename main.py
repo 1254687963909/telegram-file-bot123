@@ -154,24 +154,38 @@ async def group_handler(message: types.Message):
     # Reklama filtri
     if await AdFilter()(message):
         try:
+            # Foydalanuvchi adminmi yoki yo'qmi tekshirish
             member = await message.chat.get_member(message.from_user.id)
             if member.status in ['administrator', 'creator']:
                 return
         except:
             return
 
-        # Bot adminligini tekshirish
-        bot_member = await message.chat.get_member(bot.id)
-        if not bot_member.can_delete_messages or not bot_member.can_restrict_members:
+        # --- BOT ADMINLIGINI TO'G'RI TEKSHIRISH ---
+        try:
+            bot_member = await message.chat.get_member(bot.id)
+            
+            # Agar bot admin bo'lmasa, funksiyani to'xtatamiz
+            if bot_member.status not in ["administrator", "creator"]:
+                return
+
+            # Endi ruxsatlarni tekshiramiz (Bot admin bo'lsagina bu xususiyatlar mavjud bo'ladi)
+            if not bot_member.can_delete_messages or not bot_member.can_restrict_members:
+                return
+        except Exception as e:
+            logging.error(f"Bot adminligini tekshirishda xato: {e}")
             return
 
+        # Reklamani o'chirish va jazolash qismi
         try:
             await message.delete()
             
-            # Jazo hisoblash
-            cursor.execute("SELECT count, last_time FROM violations WHERE user_id = ? AND chat_id = ?", (message.from_user.id, message.chat.id))
+            user_id = message.from_user.id
+            chat_id = message.chat.id
+            
+            cursor.execute("SELECT count, last_time FROM violations WHERE user_id = ? AND chat_id = ?", (user_id, chat_id))
             row = cursor.fetchone()
-            mute_min, count = 20, 1
+            mute_min, count = 10, 1
             
             if row:
                 last_time = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S.%f')
@@ -180,17 +194,17 @@ async def group_handler(message: types.Message):
                     mute_min = count * 10
             
             await bot.restrict_chat_member(
-                message.chat.id, 
-                message.from_user.id, 
+                chat_id, 
+                user_id, 
                 ChatPermissions(can_send_messages=False),
                 until_date=datetime.now() + timedelta(minutes=mute_min)
             )
             
             cursor.execute("INSERT OR REPLACE INTO violations VALUES (?, ?, ?, ?)", 
-                           (message.from_user.id, message.chat.id, count, datetime.now()))
+                           (user_id, chat_id, count, datetime.now()))
             conn.commit()
-        except:
-            pass
+        except Exception as e:
+            logging.error(f"O'chirishda xato: {e}")
 
 async def main():
     print(f"Bot @{BOT_USERNAME} ishga tushdi. Admin ID: {ADMIN_ID}")
@@ -201,5 +215,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot to'xtatildi")
+
 
 
