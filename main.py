@@ -17,7 +17,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 raw_username = os.getenv("BOT_USERNAME", "")
 BOT_USERNAME = raw_username.replace("@", "").strip()
 
-# Admin ID ni Railway dan olamiz, agar xato bo'lsa stripping qilamiz
 admin_raw = str(os.getenv("ADMIN_ID", "6617367133")).strip()
 ADMIN_ID = int(admin_raw)
 
@@ -62,29 +61,37 @@ def admin_keyboard():
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
-# --- BUYRUQLAR ---
+def add_to_group_inline():
+    # Adminlik huquqlari bilan birga so'raydigan link
+    link = f"https://t.me/{BOT_USERNAME}?startgroup=admin&admin=delete_messages+restrict_members"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Guruhga qo'shish", url=link)]
+    ])
 
-@dp.message(Command("myid"))
-async def get_my_id(message: types.Message):
-    await message.answer(f"Sizning ID: `{message.from_user.id}`\nAdmin ID: `{ADMIN_ID}`", parse_mode="Markdown")
+# --- BUYRUQLAR ---
 
 @dp.message(Command("start"), F.chat.type == "private")
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
-    # Bazaga qo'shish
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
-    # ADMIN TEKSHIRUVI
+    # ADMIN UCHUN START
     if user_id == ADMIN_ID:
-        await message.answer("👋 Salom, Admin! Kerakli bo'limni tanlang:", reply_markup=admin_keyboard())
+        await message.answer(
+            "👋 Salom, Admin! Kerakli bo'limni tanlang yoki botni guruhga qo'shing:", 
+            reply_markup=admin_keyboard()
+        )
+        # Admin uchun ham qo'shish tugmasini alohida inline qilib yuboramiz
+        await message.answer("Botingizni guruhga qo'shish tugmasi:", reply_markup=add_to_group_inline())
         return
 
-    # FOYDALANUVCHI TEKSHIRUVI
+    # FOYDALANUVCHI UCHUN START
     if await check_subscription(user_id):
-        link = f"https://t.me/{BOT_USERNAME}?startgroup=true"
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Guruhga qo'shish", url=link)]])
-        await message.answer("✅ Obuna tasdiqlangan. Meni guruhga qo'shib admin qiling:", reply_markup=kb)
+        await message.answer(
+            "✅ Obuna tasdiqlangan. Meni guruhga qo'shib admin qiling:", 
+            reply_markup=add_to_group_inline()
+        )
     else:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Kanalga a'zo bo'lish", url=f"https://t.me/{CHANNEL_ID[1:]}")],
@@ -104,7 +111,7 @@ async def stats_handler(message: types.Message):
 
 @dp.message(F.text == "📣 Reklama yuborish", F.from_user.id == ADMIN_ID)
 async def broadcast_request(message: types.Message, state: FSMContext):
-    await message.answer("📣 Reklama xabarini yuboring (rasm, video yoki matn).\nBekor qilish uchun: /cancel", reply_markup=types.ReplyKeyboardRemove())
+    await message.answer("📣 Reklama xabarini yuboring.\nBekor qilish: /cancel", reply_markup=types.ReplyKeyboardRemove())
     await state.set_state(BroadcastStates.waiting_for_message)
 
 @dp.message(Command("cancel"), BroadcastStates.waiting_for_message)
@@ -129,21 +136,20 @@ async def broadcast_execute(message: types.Message, state: FSMContext):
             await message.copy_to(chat_id=target)
             count += 1
             await asyncio.sleep(0.05)
-        except:
-            continue
+        except: continue
     await message.answer(f"✅ Yakunlandi! {count} ta manzilga yetkazildi.", reply_markup=admin_keyboard())
 
-# --- QOLGAN FUNKSIYALAR ---
+# --- CALLBACK ---
 
 @dp.callback_query(F.data == "check_sub")
 async def check_callback(call: CallbackQuery):
     if await check_subscription(call.from_user.id):
         await call.message.delete()
-        link = f"https://t.me/{BOT_USERNAME}?startgroup=true"
-        await call.message.answer("✅ Rahmat! Meni guruhga qo'shishingiz mumkin:", 
-                                  reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Guruhga qo'shish", url=link)]]))
+        await call.message.answer("✅ Rahmat! Meni guruhga qo'shishingiz mumkin:", reply_markup=add_to_group_inline())
     else:
         await call.answer("❌ Siz hali kanalga a'zo emassiz!", show_alert=True)
+
+# --- GURUHDA ISHLASH (REKLAMA TOZALASH) ---
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def group_handler(message: types.Message):
@@ -151,39 +157,25 @@ async def group_handler(message: types.Message):
     cursor.execute("INSERT OR IGNORE INTO chats (chat_id) VALUES (?)", (message.chat.id,))
     conn.commit()
 
-    # Reklama filtri
     if await AdFilter()(message):
         try:
-            # Foydalanuvchi adminmi yoki yo'qmi tekshirish
             member = await message.chat.get_member(message.from_user.id)
-            if member.status in ['administrator', 'creator']:
-                return
-        except:
-            return
+            if member.status in ['administrator', 'creator']: return
+        except: return
 
-        # --- BOT ADMINLIGINI TO'G'RI TEKSHIRISH ---
+        # Bot adminligini va huquqlarini tekshirish (Xatolik oldi olindi)
         try:
             bot_member = await message.chat.get_member(bot.id)
-            
-            # Agar bot admin bo'lmasa, funksiyani to'xtatamiz
             if bot_member.status not in ["administrator", "creator"]:
                 return
-
-            # Endi ruxsatlarni tekshiramiz (Bot admin bo'lsagina bu xususiyatlar mavjud bo'ladi)
             if not bot_member.can_delete_messages or not bot_member.can_restrict_members:
                 return
-        except Exception as e:
-            logging.error(f"Bot adminligini tekshirishda xato: {e}")
-            return
+        except: return
 
-        # Reklamani o'chirish va jazolash qismi
         try:
             await message.delete()
             
-            user_id = message.from_user.id
-            chat_id = message.chat.id
-            
-            cursor.execute("SELECT count, last_time FROM violations WHERE user_id = ? AND chat_id = ?", (user_id, chat_id))
+            cursor.execute("SELECT count, last_time FROM violations WHERE user_id = ? AND chat_id = ?", (message.from_user.id, message.chat.id))
             row = cursor.fetchone()
             mute_min, count = 10, 1
             
@@ -194,27 +186,19 @@ async def group_handler(message: types.Message):
                     mute_min = count * 10
             
             await bot.restrict_chat_member(
-                chat_id, 
-                user_id, 
+                message.chat.id, message.from_user.id, 
                 ChatPermissions(can_send_messages=False),
                 until_date=datetime.now() + timedelta(minutes=mute_min)
             )
             
             cursor.execute("INSERT OR REPLACE INTO violations VALUES (?, ?, ?, ?)", 
-                           (user_id, chat_id, count, datetime.now()))
+                           (message.from_user.id, message.chat.id, count, datetime.now()))
             conn.commit()
-        except Exception as e:
-            logging.error(f"O'chirishda xato: {e}")
+        except: pass
 
 async def main():
-    print(f"Bot @{BOT_USERNAME} ishga tushdi. Admin ID: {ADMIN_ID}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("Bot to'xtatildi")
-
-
-
+    try: asyncio.run(main())
+    except KeyboardInterrupt: print("Stop")
