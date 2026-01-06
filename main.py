@@ -171,7 +171,7 @@ async def group_handler(message: types.Message):
             # Jazo hisoblash
             cursor.execute("SELECT count, last_time FROM violations WHERE user_id = ? AND chat_id = ?", (message.from_user.id, message.chat.id))
             row = cursor.fetchone()
-            mute_min, count = 10, 1
+            mute_min, count = 20, 1
             
             if row:
                 last_time = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S.%f')
@@ -201,4 +201,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot to'xtatildi")
+
 
