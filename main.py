@@ -19,7 +19,7 @@ raw_username = os.getenv("BOT_USERNAME", "")
 BOT_USERNAME = raw_username.replace("@", "") 
 
 # Admin ID ni Railway dan olamiz, agar bo'lmasa 6617367133 ni qo'yadi
-admin_raw = os.getenv("ADMIN_ID", "6617367133")
+admin_raw = os.getenv("ADMIN_ID", "7699033921")
 ADMIN_ID = int(admin_raw)
 
 CHANNEL_ID = "@Kimyo_imtihon_savollar"
@@ -180,3 +180,4 @@ async def main():
 if __name__ == "__main__":
     try: asyncio.run(main())
     except KeyboardInterrupt: print("Stop")
+
