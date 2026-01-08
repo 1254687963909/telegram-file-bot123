@@ -187,7 +187,7 @@ async def group_handler(message: types.Message):
             conn.commit()
 
             # 6. Ogohlantirish xabarini 1 daqiqadan keyin o'chirish (guruh toza turishi uchun)
-            await asyncio.sleep(60)
+            await asyncio.sleep(100)
             try:
                 await warn_msg.delete()
             except:
@@ -202,3 +202,4 @@ async def main():
 if __name__ == "__main__":
     try: asyncio.run(main())
     except KeyboardInterrupt: print("Stop")
+
