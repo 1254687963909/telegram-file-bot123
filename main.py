@@ -63,28 +63,6 @@ def add_to_group_inline():
     link = f"https://t.me/{BOT_USERNAME}?startgroup=admin&admin=delete_messages+restrict_members"
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Guruhga qo'shish", url=link)]])
 
-# --- BUYRUQLAR ---
-
-@dp.message(Command("start"), F.chat.type == "private")
-async def start_cmd(message: types.Message):
-    user_id = message.from_user.id
-    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
-    conn.commit()
-
-    if user_id == ADMIN_ID:
-        await message.answer("👋 Salom, Admin! Bo'limni tanlang:", reply_markup=admin_keyboard())
-        await message.answer("Guruhga qo'shish:", reply_markup=add_to_group_inline())
-        return
-
-    if await check_subscription(user_id):
-        await message.answer("✅ Obuna tasdiqlangan. Meni guruhga qo'shing:", reply_markup=add_to_group_inline())
-    else:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Kanalga a'zo bo'lish", url=f"https://t.me/{CHANNEL_ID[1:]}")],
-            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_sub")]
-        ])
-        await message.answer("⚠️ Botdan foydalanish uchun kanalga a'zo bo'ling:", reply_markup=kb)
-
 # --- ADMIN PANEL ---
 
 @dp.message(F.text == "📊 Statistika", F.from_user.id == ADMIN_ID)
@@ -123,26 +101,65 @@ async def broadcast_execute(message: types.Message, state: FSMContext):
         except: continue
     await message.answer(f"✅ {ok} ta manzilga yuborildi.", reply_markup=admin_keyboard())
 
+# --- FOYDALANUVCHILAR UCHUN ---
+
+@dp.message(Command("start"), F.chat.type == "private")
+async def start_cmd(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+
+    if user_id == ADMIN_ID:
+        await message.answer("👋 Salom, Admin!", reply_markup=admin_keyboard())
+        await message.answer("Guruhga qo'shish:", reply_markup=add_to_group_inline())
+        return
+
+    if await check_subscription(user_id):
+        await message.answer("✅ Obuna tasdiqlangan:", reply_markup=add_to_group_inline())
+    else:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📢 Kanalga a'zo bo'lish", url=f"https://t.me/{CHANNEL_ID[1:]}")],
+            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_sub")]
+        ])
+        await message.answer("⚠️ Botdan foydalanish uchun kanalga a'zo bo'ling:", reply_markup=kb)
+
 @dp.callback_query(F.data == "check_sub")
 async def check_callback(call: CallbackQuery):
     if await check_subscription(call.from_user.id):
         await call.message.delete()
-        await call.message.answer("✅ Tayyor! Guruhga qo'shishingiz mumkin:", reply_markup=add_to_group_inline())
+        await call.message.answer("✅ Tayyor! Guruhga qo'shing:", reply_markup=add_to_group_inline())
     else:
         await call.answer("❌ Obuna bo'lmagansiz!", show_alert=True)
 
-# --- GURUHDA ISHLASH (YANGILANGAN QISM) ---
+# --- GURUHDA ISHLASH (ASOSIY TOZALASH QISMI) ---
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def group_handler(message: types.Message):
+    # Guruh ID-sini bazaga qo'shish
     cursor.execute("INSERT OR IGNORE INTO chats (chat_id) VALUES (?)", (message.chat.id,))
     conn.commit()
 
+    # --- KANAL VA ANONIM ADMINLAR HIMOYA QISMI ---
+    # 1. Agar xabar ulangan kanaldan kelayotgan bo'lsa (Linked Channel)
+    if message.is_automatic_forward:
+        return
+    
+    # 2. Agar xabar kanal nomidan yozilayotgan bo'lsa (Sender Chat)
+    if message.sender_chat:
+        return
+
+    # 3. Agar foydalanuvchi ob'ekti bo'lmasa (kamdan-kam xolat, himoya uchun)
+    if not message.from_user:
+        return
+
+    # --- REKLAMA TOZALASH QISMI ---
     if await AdFilter()(message):
         try:
+            # Foydalanuvchi admin bo'lsa bot tegmaydi
             member = await message.chat.get_member(message.from_user.id)
             if member.status in ['administrator', 'creator']: return
             
+            # Botning o'zi adminligini tekshirish
             bot_member = await message.chat.get_member(bot.id)
             if bot_member.status not in ["administrator", "creator"]: return
             if not bot_member.can_delete_messages or not bot_member.can_restrict_members: return
@@ -152,7 +169,7 @@ async def group_handler(message: types.Message):
             # 1. Reklamani o'chirish
             await message.delete()
             
-            # 2. Jazo vaqtini hisoblash
+            # 2. Jazo muddatini hisoblash
             user_id = message.from_user.id
             user_name = message.from_user.full_name
             chat_id = message.chat.id
@@ -174,7 +191,7 @@ async def group_handler(message: types.Message):
                 until_date=datetime.now() + timedelta(minutes=mute_min)
             )
             
-            # 4. Guruhda xabar berish (YANGI QO'SHILGAN QISM)
+            # 4. Guruhda xabar berish
             warn_msg = await message.answer(
                 f"🚫 {user_name}, siz guruh qoidalarini buzganingiz uchun "
                 f"**{mute_min} daqiqa** sukut rejimiga o'tkazildingiz!",
@@ -186,12 +203,10 @@ async def group_handler(message: types.Message):
                            (user_id, chat_id, count, datetime.now()))
             conn.commit()
 
-            # 6. Ogohlantirish xabarini 1 daqiqadan keyin o'chirish (guruh toza turishi uchun)
-            await asyncio.sleep(100)
-            try:
-                await warn_msg.delete()
-            except:
-                pass
+            # 6. Ogohlantirishni 1 daqiqadan keyin o'chirish
+            await asyncio.sleep(120)
+            try: await warn_msg.delete()
+            except: pass
 
         except Exception as e:
             logging.error(f"Xato: {e}")
@@ -202,4 +217,3 @@ async def main():
 if __name__ == "__main__":
     try: asyncio.run(main())
     except KeyboardInterrupt: print("Stop")
-
